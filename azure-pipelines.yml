@@ -1,31 +1,56 @@
-# Starter pipeline
-# Start with a minimal pipeline that you can customize to build and deploy your code.
-# Add steps that build, run tests, deploy, and more:
-# https://aka.ms/yaml
+trigger: none
 
-version: v0.1
-testName: SampleTest
-testPlan: SampleTest.jmx
-description: Load test website home page
-engineInstances: 1
-subnetId: /subscriptions/abcdef01-2345-6789-0abc-def012345678/resourceGroups/sample-rg/providers/Microsoft.Network/virtualNetworks/load-testing-vnet/subnets/load-testing
-properties:
-  userPropertyFile: 'user.properties'
-configurationFiles:
-  - 'SampleData.csv'
-failureCriteria:
-  - avg(response_time_ms) > 300
-  - percentage(error) > 50
-  - GetCustomerDetails: avg(latency_ms) >200
-splitAllCSVs: True
-env:
-  - name: my-variable
-    value: my-value
-secrets:
-  - name: my-secret
-    value: https://akv-contoso.vault.azure.net/secrets/MySecret/abc1234567890def12345
-certificates:
-  - name: my-certificate
-    value: https://akv-contoso.vault.azure.net/certificates/MyCertificate/abc1234567890def12345
-keyVaultReferenceIdentity: /subscriptions/abcdef01-2345-6789-0abc-def012345678/resourceGroups/sample-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/sample-identity
+parameters:
+- name: instanceCount
+  displayName: Load injector instance count
+  type: number
+  default: 1
+- name: testScript
+  displayName: Test script JMX file
+  type: string
+  values: # ls Tests/ | grep ".jmx" | sed s/\.jmx//
+  - Data_Prep
+  - Debug
+  - Master1
+- name: awsEnvironment
+  displayName: Environment for execution
+  type: string
+  values:
+  - per-1
+- name: loadProfile
+  displayName: Load profile file
+  type: string
+  values: # ls -1 load-profiles/
+  - DPT_Load_Profile
+- name: delay
+  type: number
+  default: 0
+  displayName: Delay run by X minutes (0 = No delay; Max 359)
+- name: jmeterProps
+  displayName: Additional jmeter properties to send
+  type: object
+  default: |
+    barcodePrefix=AAA
+- name: rampUp
+  displayName: Ramp up duration (seconds)
+  type: number
+  default: 1200
+- name: duration
+  displayName: Total test duration (seconds)
+  type: number
+  default: 4800
 
+extends:
+  template: ./common/run-test.yml
+  parameters:
+    instanceCount: ${{ parameters.instanceCount }}
+    testScript: ${{ parameters.testScript }}
+    awsEnvironment: ${{ parameters.awsEnvironment }}
+    loadProfile: ${{ parameters.loadProfile }}
+    delay: ${{ parameters.delay }}
+    jmeterProps: ${{ parameters.jmeterProps }}
+    rampUp: ${{ parameters.rampUp }}
+    duration: ${{ parameters.duration }}
+    s3location: s3://tooling-npd-dpt-testing/performance
+    namespace: testing
+    agentPool: CVT-DPT-Perf-Testing
