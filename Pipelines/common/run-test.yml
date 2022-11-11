@@ -1,0 +1,203 @@
+# Pipeline for executing performance tests. This will be used in combination
+# with the test files from the repo that called this pipeline. Using load
+# profiles, test scripts and test data from the caller repository. Helm
+# templates and bash scripts will be called from the common repo. Parameters
+# are used to determine which test scripts to use, which load profile to use
+# and the test duration settings. The `jmeterProps` parameter can be used to
+# inject custom properties to the test script at runtime: these must be in the
+# standard JMeter property file form (new line seperated, deliminated by an
+# equals sign) e.g. `barcodePrefix=AAA`
+#
+#[PIPELINE_VALIDATION]
+# extends:
+#   template: ./common/run-test.yml
+#   parameters:
+#     instanceCount: <instanceCount>
+#     testScript: <testScript>
+#     awsEnvironment: <awsEnvironment>
+#     loadProfile: <loadProfile>
+#     delay: <delay>
+#     jmeterProps: <jmeterProps>
+#     rampUp: <rampUp>
+#     duration: <duration>
+#     s3location: <s3location>
+#     namespace: <namespace>
+#     agentPool: <agentPool>
+#     mockChecks: <mockChecks>
+trigger: none
+
+resources:
+  repositories:
+    - repository: templates
+      type: git
+      name: CVT_Digital_Programme_Tools/DPT_shared_pipelines
+
+parameters:
+- name: instanceCount
+  type: number
+  default: 1
+- name: testScript
+  type: string
+- name: awsEnvironment
+  type: string
+- name: loadProfile
+  type: string
+- name: delay
+  type: number
+  default: 0
+- name: jmeterProps
+  type: object
+- name: rampUp
+  type: number
+  default: 1200
+- name: duration
+  type: number
+  default: 4800
+- name: s3location
+  type: string
+- name: namespace
+  type: string
+  default: testing
+- name: agentPool
+  type: string
+- name: mockChecks
+  type: boolean
+  default: false
+
+stages:
+  - stage: Run_tests_container
+    jobs:
+    - job: Delay_Test
+      timeoutInMinutes: 360
+      pool: Server
+      steps:
+      - task: Delay@1
+        displayName: Delay_${{ parameters.delay }}_Minutes
+        inputs:
+          delayForMinutes: ${{ parameters.delay }}
+    - job: Run_Perf_Test
+      dependsOn: Delay_Test
+      pool: ${{ parameters.agentPool }}
+      workspace:
+        clean: all
+      timeoutInMinutes: 0
+      variables:
+      - name: selector
+        value: "app.kubernetes.io/name=distributed-jmeter,buildId=$(Build.BuildId)"
+      - name: template
+        value: '{{range .items}}{{ if not .metadata.deletionTimestamp }}{{.metadata.name}}{{\" \"}}{{end}}{{end}}'
+      - name: resultsPath
+        value: /TestResults
+      - name: loadProfilePath
+        value: TestData/load-profile
+      - name: jmeterPropsPath
+        value: TestData/customJMeterProps
+      - name: awsEnvironmentFile
+        value: aws-variables/environments.json
+      steps:
+        - checkout: self
+        - script: |
+            awsEnvironment_temp=${{parameters.awsEnvironment}}
+            env_family=${awsEnvironment_temp%%-*}
+            env_instance=${awsEnvironment_temp##*-}
+            env_account=$(jq -r '.'\"$env_family\"'.account' ${{ variables.awsEnvironmentFile }})
+            env_id=$(jq -r '.'\"$env_family\"'.id' ${{ variables.awsEnvironmentFile }})
+
+            echo "##vso[task.setvariable variable=env_family;]${env_family}"
+            echo "##vso[task.setvariable variable=env_instance;]${env_instance}"
+            echo "##vso[task.setvariable variable=env_account;]${env_account}"
+            echo "##vso[task.setvariable variable=env_id;]${env_id}"
+          displayName: Set AWS environment vars
+        - script: |
+             pip3 install requests_auth_aws_sigv4 --quiet &&
+             python3 scripts/mock-checks.py -env $(env_account)-$(env_family)-$(env_instance) -id $(env_id)
+          displayName: Mock health check
+          condition: eq('${{ parameters.mockChecks }}', 'true')
+        - task: KubectlInstaller@0
+          displayName: Kubectl Installer
+          inputs:
+            kubectlVersion: 1.15.0
+        - task: HelmInstaller@1
+          displayName: Helm installer
+          inputs: 
+            helmVersionToInstall: latest
+        - script: |
+            echo -e "Build ID: \033[0;32m$(Build.BuildId)"
+            echo "##vso[task.setvariable variable=startTime;]$(date "+%FT%TZ")"
+            echo "##vso[task.setvariable variable=fullS3location;]${{ parameters.s3location }}/${{ parameters.testScript  }}/$(date '+%Y_%m_%d_%T')/"
+            set -x
+            helm install distributed-jmeter-$(Build.BuildId) ./distributed-jmeter --set build.buildId=$(Build.BuildId) --set server.replicaCount=${{ parameters.instanceCount }} -n ${{ parameters.namespace }}
+            kubectl wait deployment/distributed-jmeter-$(Build.BuildId)-master --for=condition=available --timeout=300s -n ${{ parameters.namespace }} &&
+            kubectl wait deployment/distributed-jmeter-$(Build.BuildId)-server --for=condition=available --timeout=300s -n ${{ parameters.namespace }} &&
+            kubectl wait pods -l ${{ variables.selector }} --for=condition=ready --timeout=300s -n ${{ parameters.namespace }} || exit
+            kubectl get pods -l ${{ variables.selector }} -n ${{ parameters.namespace }}
+          displayName: Install Helm chart
+        - script: |
+            chmod +x scripts/calculateThreads.sh
+            ./scripts/calculateThreads.sh load-profiles/${{ parameters.loadProfile }} ${{ parameters.instanceCount }} ${{ variables.loadProfilePath }}
+            pod_names=$(kubectl get pods -n ${{ parameters.namespace }} -l ${{ variables.selector }} --template "${{ variables.template }}")
+            echo "${{ parameters.jmeterProps }}" > ${{ variables.jmeterPropsPath }}
+            i=1
+            for pod in ${pod_names}; do
+                set -x
+                kubectl cp Tests/ "${pod}":/jmeter/Tests -n ${{ parameters.namespace }} & 
+                kubectl cp TestData/ "${pod}":/jmeter/TestData -n ${{ parameters.namespace }} &&
+                set +x
+                if [[ "${pod}" =~ "server" ]]
+                  then
+                    set -x
+                    kubectl -n ${{ parameters.namespace }} exec "${pod}" -- sh -c "echo $(printf "%02d" $i) > /jmeter/TestData/common/podNumber.csv" &
+                    set +x
+                    (( i = i + 1 ))
+                fi
+                set +x
+            done
+            wait
+          displayName: Setup Load Injectors
+        - script: |
+            master_name=$(kubectl get pods -n ${{ parameters.namespace }} -l app.kubernetes.io/component=master,${{ variables.selector }} -o jsonpath='{.items[*].metadata.name}')
+            server_ips=$(kubectl get pods -n ${{ parameters.namespace }} -l app.kubernetes.io/component=server,${{ variables.selector }} -o jsonpath='{.items[*].status.podIP}' | tr ' ' ',')
+
+            set -x
+            kubectl -n ${{ parameters.namespace }} exec "${master_name}" -- jmeter -n \
+                -R "${server_ips}" \
+                -t /jmeter/Tests/"${{ parameters.testScript }}".jmx \
+                -l ${{ variables.resultsPath }}/test-plan.csv \
+                -j ${{ variables.resultsPath }}/jmeter.log \
+                -G aws_family=$(env_family) \
+                -G aws_instance=$(env_instance) \
+                -G aws_account=$(env_account) \
+                -G aws_id=$(env_id) \
+                -G rampUp=${{ parameters.rampUp }} \
+                -G duration=${{ parameters.duration }} \
+                -G /jmeter/${{ variables.jmeterPropsPath }} \
+                -G /jmeter/${{ variables.loadProfilePath }} \
+                -J resultsPath=${{ variables.resultsPath }} &&
+
+            chmod +x reporting/jmeterReporting.sh &&
+            ./reporting/jmeterReporting.sh "${{ parameters.namespace }}" "${master_name}" "${{ variables.resultsPath }}"
+
+            kubectl cp "${master_name}":${{ variables.resultsPath }} /TestResults -n ${{ parameters.namespace }}
+
+            pip3 install pandas --quiet &&
+            python3 scripts/error-pivot.py -i "/TestResults/test-plan.csv" -o "/TestResults/report/2. Error Count.csv"
+          displayName: Run JMeter Tests
+        - script: |
+            echo "${{ convertToJson(parameters) }}" > /TestResults/runtime-parameters.json
+            cp ${{ variables.loadProfilePath }} /TestResults
+            set -x
+            aws s3 cp /TestResults $(fullS3location) --recursive --no-progress
+          displayName: Upload files to S3
+          condition: succeededOrFailed()
+        - script: |
+            set -x
+            kubectl -n ${{ parameters.namespace }} delete deployments,pdb,service -l ${{ variables.selector }} --grace-period=60
+          displayName: Clean up deployments
+          condition: always()
+        - script: |
+            echo -e "
+                S3 Location:  \033[1;34m$(fullS3location)\033[0m
+                Start Time:   \033[1;32m$(startTime)\033[0m
+                End Time:     \033[1;32m$(date "+%FT%TZ")\033[0m
+            "
+          displayName: Reporting Info

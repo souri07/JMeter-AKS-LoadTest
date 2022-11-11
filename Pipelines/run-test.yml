@@ -1,0 +1,56 @@
+trigger: none
+
+parameters:
+- name: instanceCount
+  displayName: Load injector instance count
+  type: number
+  default: 1
+- name: testScript
+  displayName: Test script JMX file
+  type: string
+  values: # ls Tests/ | grep ".jmx" | sed s/\.jmx//
+  - Data_Prep
+  - Debug
+  - Master1
+- name: awsEnvironment
+  displayName: Environment for execution
+  type: string
+  values:
+  - per-1
+- name: loadProfile
+  displayName: Load profile file
+  type: string
+  values: # ls -1 load-profiles/
+  - DPT_Load_Profile
+- name: delay
+  type: number
+  default: 0
+  displayName: Delay run by X minutes (0 = No delay; Max 359)
+- name: jmeterProps
+  displayName: Additional jmeter properties to send
+  type: object
+  default: |
+    barcodePrefix=AAA
+- name: rampUp
+  displayName: Ramp up duration (seconds)
+  type: number
+  default: 1200
+- name: duration
+  displayName: Total test duration (seconds)
+  type: number
+  default: 4800
+
+extends:
+  template: ./common/run-test.yml
+  parameters:
+    instanceCount: ${{ parameters.instanceCount }}
+    testScript: ${{ parameters.testScript }}
+    awsEnvironment: ${{ parameters.awsEnvironment }}
+    loadProfile: ${{ parameters.loadProfile }}
+    delay: ${{ parameters.delay }}
+    jmeterProps: ${{ parameters.jmeterProps }}
+    rampUp: ${{ parameters.rampUp }}
+    duration: ${{ parameters.duration }}
+    s3location: s3://tooling-npd-dpt-testing/performance
+    namespace: testing
+    agentPool: CVT-DPT-Perf-Testing
