@@ -1,0 +1,31 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+version: v0.1
+testName: SampleTest
+testPlan: SampleTest.jmx
+description: Load test website home page
+engineInstances: 1
+subnetId: /subscriptions/abcdef01-2345-6789-0abc-def012345678/resourceGroups/sample-rg/providers/Microsoft.Network/virtualNetworks/load-testing-vnet/subnets/load-testing
+properties:
+  userPropertyFile: 'user.properties'
+configurationFiles:
+  - 'SampleData.csv'
+failureCriteria:
+  - avg(response_time_ms) > 300
+  - percentage(error) > 50
+  - GetCustomerDetails: avg(latency_ms) >200
+splitAllCSVs: True
+env:
+  - name: my-variable
+    value: my-value
+secrets:
+  - name: my-secret
+    value: https://akv-contoso.vault.azure.net/secrets/MySecret/abc1234567890def12345
+certificates:
+  - name: my-certificate
+    value: https://akv-contoso.vault.azure.net/certificates/MyCertificate/abc1234567890def12345
+keyVaultReferenceIdentity: /subscriptions/abcdef01-2345-6789-0abc-def012345678/resourceGroups/sample-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/sample-identity
+
