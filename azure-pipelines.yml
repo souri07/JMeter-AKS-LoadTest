@@ -9,9 +9,7 @@ parameters:
   displayName: Test script JMX file
   type: string
   values: # ls Tests/ | grep ".jmx" | sed s/\.jmx//
-  - Data_Prep
-  - Debug
-  - Master1
+  - SampleTestPlan
 - name: azureEnvironment
   displayName: Environment for execution
   type: string
