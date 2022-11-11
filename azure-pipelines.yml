@@ -12,16 +12,16 @@ parameters:
   - Data_Prep
   - Debug
   - Master1
-- name: awsEnvironment
+- name: azureEnvironment
   displayName: Environment for execution
   type: string
   values:
-  - per-1
+  - UAT
 - name: loadProfile
   displayName: Load profile file
   type: string
   values: # ls -1 load-profiles/
-  - DPT_Load_Profile
+  - Load_Profile
 - name: delay
   type: number
   default: 0
@@ -45,7 +45,7 @@ extends:
   parameters:
     instanceCount: ${{ parameters.instanceCount }}
     testScript: ${{ parameters.testScript }}
-    awsEnvironment: ${{ parameters.awsEnvironment }}
+    azureEnvironment: ${{ parameters.azureEnvironment }}
     loadProfile: ${{ parameters.loadProfile }}
     delay: ${{ parameters.delay }}
     jmeterProps: ${{ parameters.jmeterProps }}
