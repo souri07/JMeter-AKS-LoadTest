@@ -44,6 +44,6 @@ extends:
     jmeterProps: ${{ parameters.jmeterProps }}
     rampUp: ${{ parameters.rampUp }}
     duration: ${{ parameters.duration }}
-    s3location: s3://tooling-npd-dpt-testing/performance
+    filelocation: s3://tooling-npd-dpt-testing/performance
     namespace: testing
     agentPool: CVT-DPT-Perf-Testing
