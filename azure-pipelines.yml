@@ -24,11 +24,6 @@ parameters:
   type: number
   default: 0
   displayName: Delay run by X minutes (0 = No delay; Max 359)
-- name: jmeterProps
-  displayName: Additional jmeter properties to send
-  type: object
-  default: |
-    barcodePrefix=AAA
 - name: rampUp
   displayName: Ramp up duration (seconds)
   type: number
